@@ -40,6 +40,10 @@ Anlık dürtüyle korumayı kapatmayı veya ayarları esnetmeyi önlemek için �
 ### 7. ⚡ Hızlandırılmış Test Modu
 - 1 saat beklemeden tüm senaryoları hızlıca test edebilmek için tek dokunuşla **60 saniyelik pencerede 20 sn tekil / 30 sn toplam limit (10 sn kala uyarı)** moduna geçiş yapılabilir.
 
+### 8. 🛡️ 2 Katmanlı Hibrit AdBlocker (Blackhole DNS & Sponsorlu Reklam Atlayıcı)
+- **Katman 1 — Yerel Blackhole DNS (`DoomBlockerDnsVpnService`):** Cihaz üzerinde yerel bir DNS filtresi kurarak sadece DNS (`UDP 53`) sorgularını yakalar; reklam, telemetri ve takipçi alan adlarını (`doubleclick.net`, `googlesyndication.com`, `an.facebook.com`, `ads-twitter.com`, `events.redditmedia.com`, `applovin.com` vb.) anında `0.0.0.0` (Blackhole) ile yanıtlar. Normal internet trafiği VPN tünelinden geçmez, doğrudan tam hızda akar.
+- **Katman 2 — Sosyal Medya "Sponsorlu" Reklam Otomatik Atlayıcı (`SponsoredAdSkipper`):** Instagram (Hikaye, Ana Akış, Reels), X ve Reddit'in kendi içerik sunucularından gelen **"Sponsorlu" (`Sponsored` / `Promoted`)** reklamlarını ekranda algıladığı anda Hikayelerde sonraki hikayeye geçer, akışta ise otomatik yukarı kaydırarak reklamı ekrandan uzaklaştırır.
+
 ---
 
 ## 🛠️ Teknoloji Yığını ve Mimari

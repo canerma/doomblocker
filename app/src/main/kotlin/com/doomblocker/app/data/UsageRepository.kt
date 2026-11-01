@@ -20,12 +20,17 @@ data class DailyStats(
   val todayAppUsedSeconds: Map<TrackedApp, Int>,
   val blockedAttemptsCount: Int,
   val mindfulQuitCount: Int,
+  val dnsAdsBlockedCount: Int = 0,
+  val sponsoredAdsSkippedCount: Int = 0,
 ) {
   val todayTotalUsedSeconds: Int
     get() = todayAppUsedSeconds.values.sum()
 
   val totalPreventedSessions: Int
     get() = blockedAttemptsCount + mindfulQuitCount
+
+  val totalAdsBlockedOrSkipped: Int
+    get() = dnsAdsBlockedCount + sponsoredAdsSkippedCount
 
   // Araştırmalara göre engellenen/vazgeçilen her doomscroll oturumu ortalama ~8 dakika kurtarır
   val estimatedSavedMinutes: Int
@@ -37,6 +42,7 @@ object UsageRepository {
   private const val KEY_TEST_MODE = "is_test_mode"
   private const val KEY_PROTECTION_ENABLED = "is_protection_enabled"
   private const val KEY_MINDFUL_PAUSE_ENABLED = "is_mindful_pause_enabled"
+  private const val KEY_SPONSORED_SKIP_ENABLED = "is_sponsored_skip_enabled"
   private const val KEY_STRICT_BYPASS_UNTIL = "strict_bypass_until_epoch_sec"
   private const val KEY_PREFIX_TIMESTAMPS = "timestamps_"
 
@@ -51,6 +57,8 @@ object UsageRepository {
   private const val KEY_STATS_DATE = "daily_stats_date"
   private const val KEY_STATS_BLOCKED_COUNT = "daily_stats_blocked_count"
   private const val KEY_STATS_MINDFUL_QUIT_COUNT = "daily_stats_mindful_quit_count"
+  private const val KEY_STATS_DNS_BLOCKED_COUNT = "daily_stats_dns_blocked_count"
+  private const val KEY_STATS_SPONSORED_SKIP_COUNT = "daily_stats_sponsored_skip_count"
   private const val KEY_PREFIX_DAILY_APP_SEC = "daily_stats_app_sec_"
 
   private const val MINDFUL_SESSION_TIMEOUT_SEC = 20L
@@ -69,6 +77,8 @@ object UsageRepository {
       todayAppUsedSeconds = TrackedApp.entries.associateWith { 0 },
       blockedAttemptsCount = 0,
       mindfulQuitCount = 0,
+      dnsAdsBlockedCount = 0,
+      sponsoredAdsSkippedCount = 0,
     )
   )
   val dailyStatsFlow: StateFlow<DailyStats> = _dailyStatsFlow.asStateFlow()
@@ -78,6 +88,15 @@ object UsageRepository {
 
   private val _isMindfulPauseEnabled = MutableStateFlow(true)
   val isMindfulPauseEnabled: StateFlow<Boolean> = _isMindfulPauseEnabled.asStateFlow()
+
+  private val _isSponsoredSkipEnabled = MutableStateFlow(true)
+  val isSponsoredSkipEnabled: StateFlow<Boolean> = _isSponsoredSkipEnabled.asStateFlow()
+
+  private val _isDnsVpnRunning = MutableStateFlow(false)
+  val isDnsVpnRunning: StateFlow<Boolean> = _isDnsVpnRunning.asStateFlow()
+
+  private val _lastBlockedDomain = MutableStateFlow<String?>(null)
+  val lastBlockedDomain: StateFlow<String?> = _lastBlockedDomain.asStateFlow()
 
   private val _isServiceConnected = MutableStateFlow(false)
   val isServiceConnected: StateFlow<Boolean> = _isServiceConnected.asStateFlow()
@@ -98,8 +117,10 @@ object UsageRepository {
     val isTestMode = sharedPrefs.getBoolean(KEY_TEST_MODE, false)
     val protectionEnabled = sharedPrefs.getBoolean(KEY_PROTECTION_ENABLED, true)
     val mindfulEnabled = sharedPrefs.getBoolean(KEY_MINDFUL_PAUSE_ENABLED, true)
+    val sponsoredSkip = sharedPrefs.getBoolean(KEY_SPONSORED_SKIP_ENABLED, true)
     _isProtectionEnabled.value = protectionEnabled
     _isMindfulPauseEnabled.value = mindfulEnabled
+    _isSponsoredSkipEnabled.value = sponsoredSkip
 
     val focusConfig = FocusScheduleConfig(
       enabled = sharedPrefs.getBoolean(KEY_FOCUS_ENABLED, false),
@@ -129,6 +150,10 @@ object UsageRepository {
     _isServiceConnected.value = connected
   }
 
+  fun setDnsVpnRunning(running: Boolean) {
+    _isDnsVpnRunning.value = running
+  }
+
   @Synchronized
   fun refreshSnapshot(nowEpochSec: Long = currentEpochSec()): UsageSnapshot {
     loadOrRolloverDailyStats()
@@ -148,7 +173,6 @@ object UsageRepository {
     saveTimestampsForApp(app)
 
     if (!result.isBlocked || result.snapshot.appStatuses[app]?.usedSeconds != null) {
-      // Aktif kullanım saniyesini günlük istatistiğe işle ve oturumu canlı tut
       approvedSessionLastSeenSec[app] = nowEpochSec
       incrementDailyAppUsageSecond(app)
     }
@@ -165,7 +189,6 @@ object UsageRepository {
 
   @Synchronized
   fun approveMindfulSession(app: TrackedApp, nowEpochSec: Long = currentEpochSec()) {
-    // Kullanıcı 3 saniyelik ekranı onayladı; uygulamaya geçiş için ek tolerans tanı
     approvedSessionLastSeenSec[app] = nowEpochSec + 10L
   }
 
@@ -178,6 +201,12 @@ object UsageRepository {
   fun setMindfulPauseEnabled(enabled: Boolean) {
     _isMindfulPauseEnabled.value = enabled
     prefs?.edit()?.putBoolean(KEY_MINDFUL_PAUSE_ENABLED, enabled)?.apply()
+  }
+
+  @Synchronized
+  fun setSponsoredSkipEnabled(enabled: Boolean) {
+    _isSponsoredSkipEnabled.value = enabled
+    prefs?.edit()?.putBoolean(KEY_SPONSORED_SKIP_ENABLED, enabled)?.apply()
   }
 
   @Synchronized
@@ -210,6 +239,25 @@ object UsageRepository {
     val updated = current.copy(mindfulQuitCount = current.mindfulQuitCount + 1)
     _dailyStatsFlow.value = updated
     prefs?.edit()?.putInt(KEY_STATS_MINDFUL_QUIT_COUNT, updated.mindfulQuitCount)?.apply()
+  }
+
+  @Synchronized
+  fun recordDnsAdBlocked(domain: String) {
+    _lastBlockedDomain.value = domain
+    loadOrRolloverDailyStats()
+    val current = _dailyStatsFlow.value
+    val updated = current.copy(dnsAdsBlockedCount = current.dnsAdsBlockedCount + 1)
+    _dailyStatsFlow.value = updated
+    prefs?.edit()?.putInt(KEY_STATS_DNS_BLOCKED_COUNT, updated.dnsAdsBlockedCount)?.apply()
+  }
+
+  @Synchronized
+  fun recordSponsoredAdSkipped() {
+    loadOrRolloverDailyStats()
+    val current = _dailyStatsFlow.value
+    val updated = current.copy(sponsoredAdsSkippedCount = current.sponsoredAdsSkippedCount + 1)
+    _dailyStatsFlow.value = updated
+    prefs?.edit()?.putInt(KEY_STATS_SPONSORED_SKIP_COUNT, updated.sponsoredAdsSkippedCount)?.apply()
   }
 
   @Synchronized
@@ -267,6 +315,8 @@ object UsageRepository {
       edit.putString(KEY_STATS_DATE, today)
       edit.putInt(KEY_STATS_BLOCKED_COUNT, 0)
       edit.putInt(KEY_STATS_MINDFUL_QUIT_COUNT, 0)
+      edit.putInt(KEY_STATS_DNS_BLOCKED_COUNT, 0)
+      edit.putInt(KEY_STATS_SPONSORED_SKIP_COUNT, 0)
       TrackedApp.entries.forEach { app ->
         edit.putInt(KEY_PREFIX_DAILY_APP_SEC + app.name, 0)
       }
@@ -276,6 +326,8 @@ object UsageRepository {
         todayAppUsedSeconds = TrackedApp.entries.associateWith { 0 },
         blockedAttemptsCount = 0,
         mindfulQuitCount = 0,
+        dnsAdsBlockedCount = 0,
+        sponsoredAdsSkippedCount = 0,
       )
     } else {
       val appMap = TrackedApp.entries.associateWith { app ->
@@ -286,6 +338,8 @@ object UsageRepository {
         todayAppUsedSeconds = appMap,
         blockedAttemptsCount = sharedPrefs.getInt(KEY_STATS_BLOCKED_COUNT, 0),
         mindfulQuitCount = sharedPrefs.getInt(KEY_STATS_MINDFUL_QUIT_COUNT, 0),
+        dnsAdsBlockedCount = sharedPrefs.getInt(KEY_STATS_DNS_BLOCKED_COUNT, 0),
+        sponsoredAdsSkippedCount = sharedPrefs.getInt(KEY_STATS_SPONSORED_SKIP_COUNT, 0),
       )
     }
   }

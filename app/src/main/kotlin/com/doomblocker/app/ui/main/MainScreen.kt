@@ -1,12 +1,14 @@
 package com.doomblocker.app.ui.main
 
 import android.Manifest
+import android.app.Activity
 import android.app.TimePickerDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.VpnService
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
+import com.doomblocker.app.adblock.DoomBlockerDnsVpnService
 import com.doomblocker.app.data.DailyStats
 import com.doomblocker.app.data.UsageRepository
 import com.doomblocker.app.domain.AppUsageStatus
@@ -88,6 +91,9 @@ fun MainScreen(
   val dailyStats by UsageRepository.dailyStatsFlow.collectAsStateWithLifecycle()
   val isProtectionEnabled by UsageRepository.isProtectionEnabled.collectAsStateWithLifecycle()
   val isMindfulPauseEnabled by UsageRepository.isMindfulPauseEnabled.collectAsStateWithLifecycle()
+  val isSponsoredSkipEnabled by UsageRepository.isSponsoredSkipEnabled.collectAsStateWithLifecycle()
+  val isDnsVpnRunning by UsageRepository.isDnsVpnRunning.collectAsStateWithLifecycle()
+  val lastBlockedDomain by UsageRepository.lastBlockedDomain.collectAsStateWithLifecycle()
   val isServiceConnectedFlow by UsageRepository.isServiceConnected.collectAsStateWithLifecycle()
 
   var isAccessibilityEnabledInSettings by remember {
@@ -104,6 +110,14 @@ fun MainScreen(
     contract = ActivityResultContracts.RequestPermission(),
   ) { granted ->
     hasNotificationPermission = granted
+  }
+
+  val vpnPermissionLauncher = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.StartActivityForResult(),
+  ) { result ->
+    if (result.resultCode == Activity.RESULT_OK) {
+      startDnsVpnService(context)
+    }
   }
 
   LaunchedEffect(Unit) {
@@ -187,17 +201,40 @@ fun MainScreen(
       // 2. Bugünün Özeti & Kurtarılan Zaman Kartı
       DailyStatsSummaryCard(dailyStats = dailyStats)
 
-      // 3. Son 60 Dakika Genel Havuz (Hibrit Model) Kartı
+      // 3. 2 Katmanlı Hibrit AdBlocker Kartı (Blackhole DNS + Sponsorlu Reklam Atlayıcı)
+      HybridAdBlockerCard(
+        isDnsVpnRunning = isDnsVpnRunning,
+        isSponsoredSkipEnabled = isSponsoredSkipEnabled,
+        dnsAdsBlockedCount = dailyStats.dnsAdsBlockedCount,
+        sponsoredAdsSkippedCount = dailyStats.sponsoredAdsSkippedCount,
+        lastBlockedDomain = lastBlockedDomain,
+        onToggleDnsVpn = { enable ->
+          if (enable) {
+            val prepareIntent = VpnService.prepare(context)
+            if (prepareIntent != null) {
+              vpnPermissionLauncher.launch(prepareIntent)
+            } else {
+              startDnsVpnService(context)
+            }
+          } else {
+            stopDnsVpnService(context)
+          }
+        },
+        onToggleSponsoredSkip = { enabled ->
+          UsageRepository.setSponsoredSkipEnabled(enabled)
+        },
+      )
+
+      // 4. Son 60 Dakika Genel Havuz (Hibrit Model) Kartı
       HybridPoolSummaryCard(snapshot = snapshot)
 
-      // 4. Gece / Derin Odak Saatleri & Bilinçli Duraksama Ayarları
+      // 5. Gece / Derin Odak Saatleri & Bilinçli Duraksama Ayarları
       FocusAndMindfulCard(
         context = context,
         focusSchedule = snapshot.focusSchedule,
         isFocusCurrentlyActive = snapshot.isFocusScheduleCurrentlyActive,
         isMindfulPauseEnabled = isMindfulPauseEnabled,
         onUpdateFocusSchedule = { newConfig ->
-          // Eğer şu an odak saatleri aktifse ve kullanıcı kapatmak veya saatleri değiştirmek istiyorsa Strict Mode iste
           if (snapshot.isFocusScheduleCurrentlyActive) {
             requestStrictAction("Aktif Odak Saatlerini Değiştir") {
               UsageRepository.updateFocusSchedule(newConfig)
@@ -217,7 +254,7 @@ fun MainScreen(
         },
       )
 
-      // 5. Uygulama Bazlı Durum Kartları (Instagram, X, Reddit, YouTube Shorts)
+      // 6. Uygulama Bazlı Durum Kartları (Instagram, X, Reddit, YouTube Shorts)
       Text(
         text = "Takip Edilen Uygulamalar (4 Uygulama)",
         style = MaterialTheme.typography.titleMedium,
@@ -235,7 +272,7 @@ fun MainScreen(
         )
       }
 
-      // 6. Test Modu & Koruma Yönetimi (Strict Mode Korumalı)
+      // 7. Test Modu & Koruma Yönetimi (Strict Mode Korumalı)
       StrictControlsCard(
         snapshot = snapshot,
         isProtectionEnabled = isProtectionEnabled,
@@ -287,6 +324,120 @@ fun MainScreen(
 }
 
 @Composable
+private fun HybridAdBlockerCard(
+  isDnsVpnRunning: Boolean,
+  isSponsoredSkipEnabled: Boolean,
+  dnsAdsBlockedCount: Int,
+  sponsoredAdsSkippedCount: Int,
+  lastBlockedDomain: String?,
+  onToggleDnsVpn: (Boolean) -> Unit,
+  onToggleSponsoredSkip: (Boolean) -> Unit,
+) {
+  Card(
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(containerColor = Color(0xFF161F2C)),
+    modifier = Modifier.fillMaxWidth(),
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+          text = "🛡️ 2 Katmanlı Hibrit AdBlocker",
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          color = Color.White,
+        )
+        Surface(
+          color = Color(0xFF0EA5E9).copy(alpha = 0.2f),
+          shape = RoundedCornerShape(8.dp),
+        ) {
+          Text(
+            text = "Bugün: ${dnsAdsBlockedCount + sponsoredAdsSkippedCount} Reklam",
+            color = Color(0xFF38BDF8),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+          )
+        }
+      }
+
+      // Katman 1: Blackhole DNS (VpnService)
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "🕳️ Katman 1: Blackhole DNS",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+          )
+          Text(
+            text = "Reklam ve takipçi sunucularını 0.0.0.0 Blackhole'a gömer (Engellenen: $dnsAdsBlockedCount).",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF9CA3AF),
+          )
+          if (!lastBlockedDomain.isNullOrBlank()) {
+            Text(
+              text = "Son engellenen: $lastBlockedDomain",
+              style = MaterialTheme.typography.labelSmall,
+              color = Color(0xFF38BDF8),
+            )
+          }
+        }
+        Switch(
+          checked = isDnsVpnRunning,
+          onCheckedChange = onToggleDnsVpn,
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = Color.White,
+            checkedTrackColor = Color(0xFF0EA5E9),
+          ),
+        )
+      }
+
+      // Katman 2: Instagram / X / Reddit Sponsorlu Gönderi Atlayıcı
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text(
+            text = "⚡ Katman 2: 'Sponsorlu' Reklam Atlayıcı",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+          )
+          Text(
+            text = "Instagram (Hikaye/Akış/Reels), X ve Reddit'teki 'Sponsorlu' reklamları otomatik kaydırır/atlar (Atlanan: $sponsoredAdsSkippedCount).",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF9CA3AF),
+          )
+        }
+        Switch(
+          checked = isSponsoredSkipEnabled,
+          onCheckedChange = onToggleSponsoredSkip,
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = Color.White,
+            checkedTrackColor = Color(0xFF10B981),
+          ),
+        )
+      }
+    }
+  }
+}
+
+@Composable
 private fun DailyStatsSummaryCard(dailyStats: DailyStats) {
   Card(
     shape = RoundedCornerShape(16.dp),
@@ -326,24 +477,24 @@ private fun DailyStatsSummaryCard(dailyStats: DailyStats) {
 
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
       ) {
         StatMetricBox(
-          title = "Bugün Toplam",
+          title = "Bugün Süre",
           value = formatSeconds(dailyStats.todayTotalUsedSeconds),
           valueColor = Color(0xFF60A5FA),
           modifier = Modifier.weight(1f),
         )
         StatMetricBox(
-          title = "Engellenen",
-          value = "${dailyStats.blockedAttemptsCount} kez",
-          valueColor = Color(0xFFF87171),
+          title = "Engel / Vazgeçiş",
+          value = "${dailyStats.totalPreventedSessions} kez",
+          valueColor = Color(0xFF4ADE80),
           modifier = Modifier.weight(1f),
         )
         StatMetricBox(
-          title = "Bilinçli Vazgeçiş",
-          value = "${dailyStats.mindfulQuitCount} kez",
-          valueColor = Color(0xFF4ADE80),
+          title = "Reklam Engeli",
+          value = "${dailyStats.totalAdsBlockedOrSkipped}",
+          valueColor = Color(0xFF38BDF8),
           modifier = Modifier.weight(1f),
         )
       }
@@ -592,7 +743,7 @@ private fun ServiceStatusCard(
             "Strict Mode doğrulamasıyla koruma geçici olarak kapatıldı."
           }
           else -> {
-            "Arka plan servisi çalışıyor. Son 1 dakika kala uyarı verir ve süre dolunca otomatik engeller."
+            "Arka plan servisi çalışıyor. Son 1 dakika kala uyarı verir, sponsorlu reklamları atlar ve süre dolunca otomatik engeller."
           }
         },
         style = MaterialTheme.typography.bodyMedium,
@@ -920,7 +1071,7 @@ private fun StrictControlsCard(
         }
 
         OutlinedButton(
-          onClick = onResetUsage,
+          onClick = { onResetUsage() },
           shape = RoundedCornerShape(10.dp),
           modifier = Modifier.weight(1f),
         ) {
@@ -1049,6 +1200,24 @@ private fun StrictModeChallengeDialog(
       }
     },
   )
+}
+
+private fun startDnsVpnService(context: Context) {
+  val intent = Intent(context, DoomBlockerDnsVpnService::class.java).apply {
+    action = DoomBlockerDnsVpnService.ACTION_START_VPN
+  }
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+    context.startForegroundService(intent)
+  } else {
+    context.startService(intent)
+  }
+}
+
+private fun stopDnsVpnService(context: Context) {
+  val intent = Intent(context, DoomBlockerDnsVpnService::class.java).apply {
+    action = DoomBlockerDnsVpnService.ACTION_STOP_VPN
+  }
+  context.startService(intent)
 }
 
 private fun isAccessibilityServiceEnabled(context: Context): Boolean {
