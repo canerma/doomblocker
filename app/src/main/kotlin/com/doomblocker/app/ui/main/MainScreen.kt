@@ -702,10 +702,10 @@ private fun HybridPoolSummaryCard(snapshot: UsageSnapshot) {
           color = Color.White,
         )
         Text(
-          text = "Kalan Havuz: ${formatSeconds(snapshot.totalRemainingSeconds)}",
+          text = "Başlangıç: ${formatCounterStartTime(snapshot.poolCounterStartEpochSec)}",
           style = MaterialTheme.typography.bodyMedium,
           fontWeight = FontWeight.SemiBold,
-          color = if (snapshot.totalRemainingSeconds == 0) Color(0xFFF87171) else Color(0xFF60A5FA),
+          color = Color(0xFF60A5FA),
         )
       }
 
@@ -811,10 +811,10 @@ private fun AppUsageCard(
           color = Color(0xFFD1D5DB),
         )
         Text(
-          text = "Kullanılabilir: ${formatSeconds(status.effectiveRemainingSeconds)}",
+          text = "Başlangıç: ${formatCounterStartTime(status.counterStartEpochSec)}",
           style = MaterialTheme.typography.bodyMedium,
           fontWeight = FontWeight.SemiBold,
-          color = Color.White,
+          color = Color(0xFF93C5FD),
         )
       }
 
@@ -1077,4 +1077,12 @@ private fun checkNotificationPermission(context: Context): Boolean {
   } else {
     true
   }
+}
+
+private fun formatCounterStartTime(epochSec: Long?): String {
+  if (epochSec == null) return "—"
+  val localTime = java.time.Instant.ofEpochSecond(epochSec)
+    .atZone(java.time.ZoneId.systemDefault())
+    .toLocalTime()
+  return "%02d:%02d".format(localTime.hour, localTime.minute)
 }

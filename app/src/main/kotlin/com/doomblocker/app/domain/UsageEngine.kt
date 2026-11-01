@@ -101,6 +101,7 @@ data class AppUsageStatus(
   val isBlocked: Boolean,
   val blockReason: BlockReason?,
   val secondsUntilUnblocked: Long,
+  val counterStartEpochSec: Long? = null,
 )
 
 data class UsageSnapshot(
@@ -111,6 +112,7 @@ data class UsageSnapshot(
   val totalUsedSeconds: Int,
   val totalRemainingSeconds: Int,
   val appStatuses: Map<TrackedApp, AppUsageStatus>,
+  val poolCounterStartEpochSec: Long? = null,
 ) {
   val isAnyAppBlocked: Boolean
     get() = appStatuses.values.any { it.isBlocked }
@@ -226,6 +228,7 @@ class UsageEngine(
         isBlocked = isBlocked,
         blockReason = reason,
         secondsUntilUnblocked = secondsUntilUnblocked,
+        counterStartEpochSec = appTimes.firstOrNull(),
       )
     }
 
@@ -237,6 +240,7 @@ class UsageEngine(
       totalUsedSeconds = totalUsed,
       totalRemainingSeconds = totalRemaining,
       appStatuses = statuses,
+      poolCounterStartEpochSec = allSorted.firstOrNull(),
     )
   }
 
