@@ -34,7 +34,6 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
   private var lastShortsBackActionTimeMs: Long = 0L
   private var lastBlockActivityLaunchTimeMs: Long = 0L
   private var lastMindfulPauseLaunchTimeMs: Long = 0L
-  private var lastSponsoredAdSkipTimeMs: Long = 0L
 
   private val ignoredSystemPackages = setOf(
     "com.android.systemui",
@@ -85,10 +84,8 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
     val snapshot = UsageRepository.refreshSnapshot()
     val status = snapshot.appStatuses[trackedApp] ?: return
 
-    val rootNode = rootInActiveWindow
-
     if (trackedApp == TrackedApp.YOUTUBE_SHORTS) {
-      if (!YouTubeShortsDetector.isShortsScreenActive(rootNode)) {
+      if (!YouTubeShortsDetector.isShortsScreenActive(rootInActiveWindow)) {
         return
       }
     }
@@ -99,17 +96,8 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
       } else {
         blockFullAppImmediately(trackedApp)
       }
-      return
-    }
-
-    if (UsageRepository.shouldTriggerMindfulPause(trackedApp)) {
+    } else if (UsageRepository.shouldTriggerMindfulPause(trackedApp)) {
       launchMindfulPauseIfNeeded(trackedApp)
-      return
-    }
-
-    // Instagram, X ve Reddit içinde "Sponsorlu" / "Promoted" reklamları otomatik atla
-    if (!trackedApp.isShortsOnly && UsageRepository.isSponsoredSkipEnabled.value) {
-      trySkipSponsoredAd(rootNode)
     }
   }
 
@@ -145,6 +133,7 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
     if (trackedApp == TrackedApp.YOUTUBE_SHORTS) {
       val isShortsActive = YouTubeShortsDetector.isShortsScreenActive(rootNode)
       if (!isShortsActive) {
+        // Normal YouTube izleniyor -> süre sayılmaz ve engellenmez
         UsageRepository.refreshSnapshot()
         return
       }
@@ -167,10 +156,6 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
       return
     }
 
-    if (!trackedApp.isShortsOnly && UsageRepository.isSponsoredSkipEnabled.value) {
-      trySkipSponsoredAd(rootNode)
-    }
-
     val tickResult = UsageRepository.recordTick(trackedApp)
 
     if (tickResult.shouldTriggerWarning) {
@@ -182,35 +167,6 @@ class DoomBlockerAccessibilityService : AccessibilityService() {
         exitYouTubeShortsWithNotice()
       } else {
         blockFullAppImmediately(trackedApp)
-      }
-    }
-  }
-
-  private fun trySkipSponsoredAd(rootNode: AccessibilityNodeInfo?) {
-    val nowMs = System.currentTimeMillis()
-    if (nowMs - lastSponsoredAdSkipTimeMs < 1100L) return
-
-    val metrics = resources.displayMetrics
-    val screenWidth = metrics.widthPixels
-    val screenHeight = metrics.heightPixels
-
-    val adType = SponsoredAdSkipper.detectVisibleSponsoredAd(rootNode, screenHeight) ?: return
-    lastSponsoredAdSkipTimeMs = nowMs
-
-    val dispatched = SponsoredAdSkipper.performSkipGesture(
-      service = this,
-      adType = adType,
-      screenWidth = screenWidth,
-      screenHeight = screenHeight,
-    )
-    if (dispatched) {
-      UsageRepository.recordSponsoredAdSkipped()
-      mainHandler.post {
-        Toast.makeText(
-          applicationContext,
-          "⚡ Sponsorlu reklam otomatik atlandı",
-          Toast.LENGTH_SHORT,
-        ).show()
       }
     }
   }
