@@ -690,11 +690,7 @@ private fun HybridPoolSummaryCard(snapshot: UsageSnapshot) {
         color = Color(0xFF9CA3AF),
       )
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom,
-      ) {
+      Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
           text = "${formatSeconds(snapshot.totalUsedSeconds)} / ${formatSeconds(config.totalLimitSeconds)}",
           style = MaterialTheme.typography.headlineSmall,
@@ -702,9 +698,9 @@ private fun HybridPoolSummaryCard(snapshot: UsageSnapshot) {
           color = Color.White,
         )
         Text(
-          text = "Başlangıç: ${formatCounterStartTime(snapshot.poolCounterStartEpochSec)}",
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.SemiBold,
+          text = "Sayaç Başlangıcı: ${formatCounterStartTime(snapshot.poolCounterStartEpochSec)}",
+          style = MaterialTheme.typography.bodySmall,
+          fontWeight = FontWeight.Medium,
           color = Color(0xFF60A5FA),
         )
       }
@@ -801,19 +797,16 @@ private fun AppUsageCard(
         )
       }
 
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
+      Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
           text = "Son Pencere: ${formatSeconds(status.usedSeconds)} / ${formatSeconds(status.perAppLimitSeconds)}",
           style = MaterialTheme.typography.bodyMedium,
           color = Color(0xFFD1D5DB),
         )
         Text(
-          text = "Başlangıç: ${formatCounterStartTime(status.counterStartEpochSec)}",
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = FontWeight.SemiBold,
+          text = "Sayaç Başlangıcı: ${formatCounterStartTime(status.counterStartEpochSec)}",
+          style = MaterialTheme.typography.bodySmall,
+          fontWeight = FontWeight.Medium,
           color = Color(0xFF93C5FD),
         )
       }
