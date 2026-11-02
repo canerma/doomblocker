@@ -38,11 +38,6 @@
         </aapt:attr>
     </path>
 
-    <!-- Üst Odak Noktası (Mindful Dot) -->
-    <path
-        android:fillColor="#A7F3D0"
-        android:pathData="M54,26m-2.4,0a2.4,2.4 0,1 1,4.8 0a2.4,2.4 0,1 1,-4.8 0" />
-
     <!-- Sol Duraksama (Pause) Çubuğu (Yuvarlatılmış Köşeli) -->
     <path android:pathData="M47.5,43L49.5,43A2.5,2.5 0,0 1,52 45.5L52,62.5A2.5,2.5 0,0 1,49.5 65L47.5,65A2.5,2.5 0,0 1,45 62.5L45,45.5A2.5,2.5 0,0 1,47.5 43z">
         <aapt:attr name="android:fillColor">
